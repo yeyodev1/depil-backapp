@@ -9,6 +9,9 @@ type ReservoAppointment = {
   uuid?: string;
   inicio?: string;
   zona_horaria?: string;
+  sucursal?: {
+    nombre?: string;
+  };
   cliente?: {
     nombre?: string;
     apellido_paterno?: string;
@@ -44,6 +47,19 @@ function getSyncDays() {
   return Number.isInteger(value) && value > 0 ? value : DEFAULT_SYNC_DAYS;
 }
 
+function normalizeBranchName(value?: string) {
+  return (value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+}
+
+function getExcludedBranches() {
+  return new Set(
+    (process.env.RESERVO_EXCLUDED_BRANCHES || "")
+      .split(",")
+      .map(normalizeBranchName)
+      .filter(Boolean),
+  );
+}
+
 function hasAppointmentDetails(appointment: ReservoAppointment): appointment is ReservoAppointmentWithDetails {
   return Boolean(appointment.uuid && appointment.inicio);
 }
@@ -77,7 +93,17 @@ async function getReservoAppointments() {
 
 export async function syncReservoAppointments() {
   const appointments = await getReservoAppointments();
-  const appointmentsWithDetails = appointments.filter(hasAppointmentDetails);
+  const excludedBranches = getExcludedBranches();
+  const excludedAppointments = appointments.filter(
+    (appointment) => appointment.uuid && excludedBranches.has(normalizeBranchName(appointment.sucursal?.nombre)),
+  );
+  const excludedIds = excludedAppointments.map((appointment) => appointment.uuid as string);
+  const removed = excludedIds.length
+    ? await ReminderJob.deleteMany({ externalId: { $in: excludedIds } }).exec()
+    : { deletedCount: 0 };
+  const appointmentsWithDetails = appointments
+    .filter((appointment) => !excludedBranches.has(normalizeBranchName(appointment.sucursal?.nombre)))
+    .filter(hasAppointmentDetails);
   const externalIds = appointmentsWithDetails.map((appointment) => appointment.uuid);
   const existingJobs = await ReminderJob.find({ externalId: { $in: externalIds } }).select("externalId").lean().exec();
   const existingExternalIds = new Set(existingJobs.map((job) => job.externalId));
@@ -98,5 +124,5 @@ export async function syncReservoAppointments() {
     });
   }));
 
-  return { found: appointments.length, created: newAppointments.length };
+  return { found: appointments.length, excluded: excludedAppointments.length, removed: removed.deletedCount || 0, created: newAppointments.length };
 }
