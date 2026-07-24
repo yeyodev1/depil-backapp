@@ -21,6 +21,7 @@ export interface ReminderJobDocument {
   webhookUrl: string;
   webhookToken?: string;
   customerName?: string;
+  customerLastName?: string;
   customerEmail?: string;
   customerPhone?: string;
   metadata: Record<string, unknown>;
@@ -50,6 +51,7 @@ const ReminderJobSchema = new Schema<ReminderJobDocument>(
     webhookUrl: { type: String, required: true },
     webhookToken: { type: String, default: "" },
     customerName: { type: String, default: "" },
+    customerLastName: { type: String, default: "" },
     customerEmail: { type: String, default: "" },
     customerPhone: { type: String, default: "" },
     metadata: { type: Schema.Types.Mixed, default: {} },
@@ -58,5 +60,6 @@ const ReminderJobSchema = new Schema<ReminderJobDocument>(
   { timestamps: true },
 );
 ReminderJobSchema.index({ "reminders.scheduledAt": 1, "reminders.status": 1, "reminders.nextAttemptAt": 1 });
+ReminderJobSchema.index({ externalId: 1 });
 
 export const ReminderJob = models.ReminderJob || model<ReminderJobDocument>("ReminderJob", ReminderJobSchema);

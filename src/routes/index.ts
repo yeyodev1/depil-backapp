@@ -1,5 +1,6 @@
 import express, { Application } from "express";
 import { createReminderJob, processDueReminders, serializeReminderJob } from "../services/reminders.service";
+import { syncReservoAppointments } from "../services/reservo.service";
 
 function routerApi(app: Application) {
   const router = express.Router();
@@ -16,9 +17,11 @@ function routerApi(app: Application) {
 
   router.get("/cron/tumesero-sync", async (_req, res, next) => {
     try {
+      const sync = await syncReservoAppointments();
       const results = await processDueReminders();
       res.status(200).json({
         ok: true,
+        sync,
         processed: results.length,
         results,
       });

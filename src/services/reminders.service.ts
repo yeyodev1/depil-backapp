@@ -12,6 +12,7 @@ type ReminderInput = {
   webhookUrl?: string;
   webhookToken?: string;
   customerName?: string;
+  customerLastName?: string;
   customerEmail?: string;
   customerPhone?: string;
   externalId?: string;
@@ -147,8 +148,15 @@ export function buildWebhookPayload(job: ReminderJobDocument, reminder: Reminder
     appointmentAt: job.appointmentAt.toISOString(),
     timezone: job.timezone,
     customerName: job.customerName || null,
+    customerLastName: job.customerLastName || null,
     customerEmail: job.customerEmail || null,
     customerPhone: job.customerPhone || null,
+    firstName: job.customerName || null,
+    lastName: job.customerLastName || null,
+    nombre: job.customerName || null,
+    apellido: job.customerLastName || null,
+    email: job.customerEmail || null,
+    phone: job.customerPhone || null,
     externalId: job.externalId || null,
     metadata: job.metadata || {},
   };
@@ -156,7 +164,7 @@ export function buildWebhookPayload(job: ReminderJobDocument, reminder: Reminder
 
 async function dispatchReminder(job: ReminderJobDocument, reminder: ReminderStep) {
   const webhookUrl = normalizeWebhookUrl(job.webhookUrl);
-  const webhookToken = job.webhookToken || process.env.RESERVO_TOKEN || "";
+  const webhookToken = job.webhookToken || process.env.LEADCONNECTOR_WEBHOOK_TOKEN || "";
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -184,7 +192,7 @@ export async function createReminderJob(input: ReminderInput) {
   }
 
   const timezone = normalizeTimezone(input.timezone);
-  const reminders = buildReminderSchedule(appointmentAt, timezone);
+  const reminders = buildReminderSchedule(appointmentAt, timezone).filter((reminder) => reminder.scheduledAt > new Date());
   const webhookUrl = normalizeWebhookUrl(input.webhookUrl);
 
   const job = await ReminderJob.create({
@@ -192,8 +200,9 @@ export async function createReminderJob(input: ReminderInput) {
     appointmentAt,
     timezone,
     webhookUrl,
-    webhookToken: input.webhookToken || process.env.RESERVO_TOKEN || "",
+    webhookToken: input.webhookToken || process.env.LEADCONNECTOR_WEBHOOK_TOKEN || "",
     customerName: input.customerName || "",
+    customerLastName: input.customerLastName || "",
     customerEmail: input.customerEmail || "",
     customerPhone: input.customerPhone || "",
     metadata: input.metadata || {},
@@ -201,6 +210,17 @@ export async function createReminderJob(input: ReminderInput) {
   });
 
   return job;
+}
+
+export async function createReminderJobIfMissing(input: ReminderInput) {
+  if (input.externalId) {
+    const existing = await ReminderJob.findOne({ externalId: input.externalId }).exec();
+    if (existing) {
+      return { job: existing, created: false };
+    }
+  }
+
+  return { job: await createReminderJob(input), created: true };
 }
 
 export async function processDueReminders(now = new Date()): Promise<ReminderDispatchResult[]> {
@@ -270,6 +290,7 @@ export function serializeReminderJob(job: ReminderJobDocument) {
     timezone: job.timezone,
     webhookUrl: job.webhookUrl,
     customerName: job.customerName || null,
+    customerLastName: job.customerLastName || null,
     customerEmail: job.customerEmail || null,
     customerPhone: job.customerPhone || null,
     metadata: job.metadata || {},

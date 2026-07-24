@@ -35,6 +35,7 @@ test("buildWebhookPayload exposes key and condition clearly", () => {
       webhookUrl: "https://example.com/webhook",
       webhookToken: "",
       customerName: "Daniela",
+      customerLastName: "Pérez",
       customerEmail: "daniela@example.com",
       customerPhone: "+593987179785",
       externalId: "appointment-123",
@@ -59,6 +60,13 @@ test("buildWebhookPayload exposes key and condition clearly", () => {
   assert.equal(payload.tipo_recordatorio, "1_hora_antes");
   assert.equal(payload.message, "Último recordatorio: tu cita es en 1 hora.");
   assert.equal(payload.customerName, "Daniela");
+  assert.equal(payload.customerLastName, "Pérez");
+  assert.equal(payload.firstName, "Daniela");
+  assert.equal(payload.lastName, "Pérez");
+  assert.equal(payload.nombre, "Daniela");
+  assert.equal(payload.apellido, "Pérez");
+  assert.equal(payload.email, "daniela@example.com");
+  assert.equal(payload.phone, "+593987179785");
   assert.equal(payload.externalId, "appointment-123");
 });
 
