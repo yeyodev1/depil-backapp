@@ -27,6 +27,13 @@ test("buildReminderSchedule moves GYQ after-hours reminders to closing time", ()
   assert.equal(reminders[1].scheduledAt.toISOString(), "2026-07-09T23:30:00.000Z");
 });
 
+test("buildReminderSchedule keeps Ceibos reminders within the Quito schedule", () => {
+  const appointmentAt = new Date("2026-07-10T14:00:00.000Z");
+  const reminders = buildReminderSchedule(appointmentAt, "America/Guayaquil", "CEIBOS");
+
+  assert.equal(reminders[1].scheduledAt.toISOString(), "2026-07-10T00:00:00.000Z");
+});
+
 test("getReminderMessage returns a distinct message per reminder type", () => {
   assert.equal(getReminderMessage({ type: "day_before_9am" } as never), "Recordatorio: tu cita está confirmada para mañana.");
   assert.equal(getReminderMessage({ type: "ten_hours_after_first" } as never), "Segundo recordatorio: tu cita se acerca.");

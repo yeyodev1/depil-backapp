@@ -3,6 +3,7 @@ import { ReminderJob, ReminderJobDocument, ReminderStep, ReminderStepType } from
 
 const RETRY_DELAY_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
+export const REMINDER_SCHEDULE_VERSION = "branch-hours-v2";
 const DEFAULT_LEADCONNECTOR_WEBHOOK_URL =
   "https://services.leadconnectorhq.com/hooks/Mi698GRnau2R4Z1oR1nG/webhook-trigger/651a9c64-bab3-4b46-b70a-b2fd7267722e";
 
@@ -94,7 +95,7 @@ function getBranchHours(branchName?: string): BranchHours | null {
     return null;
   }
 
-  if (normalized.includes("QUITO")) {
+  if (normalized.includes("QUITO") || normalized.includes("CEIBOS") || normalized.includes("MANTA")) {
     return { openMinutes: 8 * 60, closeMinutes: 19 * 60 + 30, operatingDays: [1, 2, 3, 4, 5, 6] };
   }
 
@@ -270,6 +271,7 @@ export async function createReminderJob(input: ReminderInput) {
     appointmentAt,
     timezone,
     branchName: input.branchName || "",
+    scheduleVersion: REMINDER_SCHEDULE_VERSION,
     webhookUrl,
     webhookToken: input.webhookToken || process.env.LEADCONNECTOR_WEBHOOK_TOKEN || "",
     customerName: input.customerName || "",
@@ -296,6 +298,7 @@ export async function rescheduleReminderJob(job: ReminderJobDocument, input: Rem
         appointmentAt,
         timezone,
         branchName: input.branchName || "",
+        scheduleVersion: REMINDER_SCHEDULE_VERSION,
         customerName: input.customerName || "",
         customerLastName: input.customerLastName || "",
         customerEmail: input.customerEmail || "",

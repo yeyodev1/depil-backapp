@@ -19,6 +19,7 @@ export interface ReminderJobDocument {
   appointmentAt: Date;
   timezone: string;
   branchName?: string;
+  scheduleVersion?: string;
   webhookUrl: string;
   webhookToken?: string;
   customerName?: string;
@@ -50,6 +51,7 @@ const ReminderJobSchema = new Schema<ReminderJobDocument>(
     appointmentAt: { type: Date, required: true },
     timezone: { type: String, required: true },
     branchName: { type: String, default: "" },
+    scheduleVersion: { type: String, default: "" },
     webhookUrl: { type: String, required: true },
     webhookToken: { type: String, default: "" },
     customerName: { type: String, default: "" },

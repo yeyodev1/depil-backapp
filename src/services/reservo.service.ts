@@ -1,6 +1,6 @@
 import axios from "axios";
 import { ReminderJob } from "../models/ReminderJob";
-import { createReminderJob, ReminderInput, rescheduleReminderJob } from "./reminders.service";
+import { createReminderJob, ReminderInput, REMINDER_SCHEDULE_VERSION, rescheduleReminderJob } from "./reminders.service";
 
 const RESERVO_API_URL = "https://reservo.cl/APIpublica/v2";
 const DEFAULT_SYNC_DAYS = 2;
@@ -146,7 +146,7 @@ export async function syncReservoAppointments() {
   const newAppointments = appointmentsWithDetails.filter((appointment) => !existingExternalIds.has(appointment.uuid));
 
   await Promise.all(newAppointments.map((appointment) => createReminderJob(toReminderInput(appointment))));
-  const jobsNeedingBranchSchedule = existingJobs.filter((job) => !job.branchName);
+  const jobsNeedingBranchSchedule = existingJobs.filter((job) => job.scheduleVersion !== REMINDER_SCHEDULE_VERSION);
   await Promise.all(jobsNeedingBranchSchedule.map((job) => {
     const appointment = appointmentsWithDetails.find((item) => item.uuid === job.externalId);
     return appointment ? rescheduleReminderJob(job, toReminderInput(appointment)) : job;
