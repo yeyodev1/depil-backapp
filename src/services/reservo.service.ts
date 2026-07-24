@@ -106,8 +106,29 @@ async function getReservoAppointments() {
   return appointments;
 }
 
+async function removeDuplicateReminderJobs() {
+  const duplicates = await ReminderJob.aggregate<{
+    _id: string;
+    jobIds: string[];
+  }>([
+    { $match: { externalId: { $type: "string", $ne: "" } } },
+    { $sort: { createdAt: 1 } },
+    { $group: { _id: "$externalId", jobIds: { $push: "$_id" }, count: { $sum: 1 } } },
+    { $match: { count: { $gt: 1 } } },
+  ]).exec();
+  const duplicateIds = duplicates.flatMap((group) => group.jobIds.slice(1));
+
+  if (!duplicateIds.length) {
+    return 0;
+  }
+
+  const result = await ReminderJob.deleteMany({ _id: { $in: duplicateIds } }).exec();
+  return result.deletedCount || 0;
+}
+
 export async function syncReservoAppointments() {
   const appointments = await getReservoAppointments();
+  const deduplicated = await removeDuplicateReminderJobs();
   const excludedBranches = getExcludedBranches();
   const excludedAppointments = appointments.filter(
     (appointment) => appointment.uuid && excludedBranches.has(normalizeBranchName(appointment.sucursal?.nombre)),
@@ -137,5 +158,6 @@ export async function syncReservoAppointments() {
     removed: removed.deletedCount || 0,
     created: newAppointments.length,
     rescheduled: jobsNeedingBranchSchedule.length,
+    deduplicated,
   };
 }
