@@ -1,6 +1,6 @@
 import axios from "axios";
 import { ReminderJob } from "../models/ReminderJob";
-import { createReminderJob } from "./reminders.service";
+import { createReminderJob, ReminderInput, rescheduleReminderJob } from "./reminders.service";
 
 const RESERVO_API_URL = "https://reservo.cl/APIpublica/v2";
 const DEFAULT_SYNC_DAYS = 2;
@@ -64,6 +64,21 @@ function hasAppointmentDetails(appointment: ReservoAppointment): appointment is 
   return Boolean(appointment.uuid && appointment.inicio);
 }
 
+function toReminderInput(appointment: ReservoAppointmentWithDetails): ReminderInput {
+  const client = appointment.cliente || {};
+  return {
+    externalId: appointment.uuid,
+    appointmentAt: appointment.inicio,
+    timezone: appointment.zona_horaria,
+    branchName: appointment.sucursal?.nombre,
+    customerName: client.nombre,
+    customerLastName: [client.apellido_paterno, client.apellido_materno].filter(Boolean).join(" "),
+    customerEmail: client.mail,
+    customerPhone: client.telefono_1 || client.telefono_2,
+    metadata: { source: "reservo" },
+  };
+}
+
 async function fetchAppointmentsPage(url: string) {
   const response = await axios.get<ReservoAppointmentsPage>(url, {
     headers: { Authorization: `Token ${getReservoToken()}` },
@@ -105,24 +120,22 @@ export async function syncReservoAppointments() {
     .filter((appointment) => !excludedBranches.has(normalizeBranchName(appointment.sucursal?.nombre)))
     .filter(hasAppointmentDetails);
   const externalIds = appointmentsWithDetails.map((appointment) => appointment.uuid);
-  const existingJobs = await ReminderJob.find({ externalId: { $in: externalIds } }).select("externalId").lean().exec();
+  const existingJobs = await ReminderJob.find({ externalId: { $in: externalIds } }).exec();
   const existingExternalIds = new Set(existingJobs.map((job) => job.externalId));
   const newAppointments = appointmentsWithDetails.filter((appointment) => !existingExternalIds.has(appointment.uuid));
 
-  await Promise.all(newAppointments.map(async (appointment) => {
-    const client = appointment.cliente || {};
-    const lastName = [client.apellido_paterno, client.apellido_materno].filter(Boolean).join(" ");
-    await createReminderJob({
-      externalId: appointment.uuid,
-      appointmentAt: appointment.inicio,
-      timezone: appointment.zona_horaria,
-      customerName: client.nombre,
-      customerLastName: lastName,
-      customerEmail: client.mail,
-      customerPhone: client.telefono_1 || client.telefono_2,
-      metadata: { source: "reservo" },
-    });
+  await Promise.all(newAppointments.map((appointment) => createReminderJob(toReminderInput(appointment))));
+  const jobsNeedingBranchSchedule = existingJobs.filter((job) => !job.branchName);
+  await Promise.all(jobsNeedingBranchSchedule.map((job) => {
+    const appointment = appointmentsWithDetails.find((item) => item.uuid === job.externalId);
+    return appointment ? rescheduleReminderJob(job, toReminderInput(appointment)) : job;
   }));
 
-  return { found: appointments.length, excluded: excludedAppointments.length, removed: removed.deletedCount || 0, created: newAppointments.length };
+  return {
+    found: appointments.length,
+    excluded: excludedAppointments.length,
+    removed: removed.deletedCount || 0,
+    created: newAppointments.length,
+    rescheduled: jobsNeedingBranchSchedule.length,
+  };
 }

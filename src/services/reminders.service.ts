@@ -6,9 +6,10 @@ const MAX_ATTEMPTS = 3;
 const DEFAULT_LEADCONNECTOR_WEBHOOK_URL =
   "https://services.leadconnectorhq.com/hooks/Mi698GRnau2R4Z1oR1nG/webhook-trigger/651a9c64-bab3-4b46-b70a-b2fd7267722e";
 
-type ReminderInput = {
+export type ReminderInput = {
   appointmentAt: string;
   timezone?: string;
+  branchName?: string;
   webhookUrl?: string;
   webhookToken?: string;
   customerName?: string;
@@ -81,15 +82,84 @@ function previousDayAtNineAm(appointmentAt: Date, timezone: string) {
   return zonedTimeToUtc(previousDay.getUTCFullYear(), previousDay.getUTCMonth() + 1, previousDay.getUTCDate(), 9, 0, 0, timezone);
 }
 
-export function buildReminderSchedule(appointmentAt: Date, timezone: string): ReminderStep[] {
+type BranchHours = {
+  openMinutes: number;
+  closeMinutes: number;
+  operatingDays: number[];
+};
+
+function getBranchHours(branchName?: string): BranchHours | null {
+  const normalized = (branchName || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.includes("QUITO")) {
+    return { openMinutes: 8 * 60, closeMinutes: 19 * 60 + 30, operatingDays: [1, 2, 3, 4, 5, 6] };
+  }
+
+  return { openMinutes: 9 * 60, closeMinutes: 18 * 60 + 30, operatingDays: [0, 1, 2, 3, 4, 5, 6] };
+}
+
+function toUtcAtLocalTime(date: Date, minutes: number, timezone: string) {
+  return zonedTimeToUtc(
+    date.getUTCFullYear(),
+    date.getUTCMonth() + 1,
+    date.getUTCDate(),
+    Math.floor(minutes / 60),
+    minutes % 60,
+    0,
+    timezone,
+  );
+}
+
+function previousBusinessClose(local: ReturnType<typeof getLocalDateParts>, hours: BranchHours, timezone: string) {
+  const date = new Date(Date.UTC(local.year, local.month - 1, local.day));
+  do {
+    date.setUTCDate(date.getUTCDate() - 1);
+  } while (!hours.operatingDays.includes(date.getUTCDay()));
+
+  return toUtcAtLocalTime(date, hours.closeMinutes, timezone);
+}
+
+function moveToBusinessHours(scheduledAt: Date, appointmentAt: Date, timezone: string, branchName?: string) {
+  const hours = getBranchHours(branchName);
+  if (!hours) {
+    return scheduledAt;
+  }
+
+  const local = getLocalDateParts(scheduledAt, timezone);
+  const date = new Date(Date.UTC(local.year, local.month - 1, local.day));
+  const localMinutes = local.hour * 60 + local.minute;
+  let candidate: Date;
+
+  if (hours.operatingDays.includes(date.getUTCDay())) {
+    if (localMinutes < hours.openMinutes) {
+      candidate = toUtcAtLocalTime(date, hours.openMinutes, timezone);
+    } else if (localMinutes > hours.closeMinutes) {
+      candidate = toUtcAtLocalTime(date, hours.closeMinutes, timezone);
+    } else {
+      candidate = scheduledAt;
+    }
+  } else {
+    do {
+      date.setUTCDate(date.getUTCDate() + 1);
+    } while (!hours.operatingDays.includes(date.getUTCDay()));
+    candidate = toUtcAtLocalTime(date, hours.openMinutes, timezone);
+  }
+
+  return candidate >= appointmentAt ? previousBusinessClose(local, hours, timezone) : candidate;
+}
+
+export function buildReminderSchedule(appointmentAt: Date, timezone: string, branchName?: string): ReminderStep[] {
   const firstReminder = previousDayAtNineAm(appointmentAt, timezone);
   const secondReminder = new Date(firstReminder.getTime() + 10 * 60 * 60 * 1000);
   const thirdReminder = new Date(appointmentAt.getTime() - 60 * 60 * 1000);
 
   return [
-    { type: "day_before_9am", scheduledAt: firstReminder, status: "pending", attempts: 0, nextAttemptAt: null, sentAt: null, lastError: null },
-    { type: "ten_hours_after_first", scheduledAt: secondReminder, status: "pending", attempts: 0, nextAttemptAt: null, sentAt: null, lastError: null },
-    { type: "one_hour_before", scheduledAt: thirdReminder, status: "pending", attempts: 0, nextAttemptAt: null, sentAt: null, lastError: null },
+    { type: "day_before_9am", scheduledAt: moveToBusinessHours(firstReminder, appointmentAt, timezone, branchName), status: "pending", attempts: 0, nextAttemptAt: null, sentAt: null, lastError: null },
+    { type: "ten_hours_after_first", scheduledAt: moveToBusinessHours(secondReminder, appointmentAt, timezone, branchName), status: "pending", attempts: 0, nextAttemptAt: null, sentAt: null, lastError: null },
+    { type: "one_hour_before", scheduledAt: moveToBusinessHours(thirdReminder, appointmentAt, timezone, branchName), status: "pending", attempts: 0, nextAttemptAt: null, sentAt: null, lastError: null },
   ];
 }
 
@@ -192,13 +262,14 @@ export async function createReminderJob(input: ReminderInput) {
   }
 
   const timezone = normalizeTimezone(input.timezone);
-  const reminders = buildReminderSchedule(appointmentAt, timezone).filter((reminder) => reminder.scheduledAt > new Date());
+  const reminders = buildReminderSchedule(appointmentAt, timezone, input.branchName).filter((reminder) => reminder.scheduledAt > new Date());
   const webhookUrl = normalizeWebhookUrl(input.webhookUrl);
 
   const job = await ReminderJob.create({
     externalId: input.externalId || "",
     appointmentAt,
     timezone,
+    branchName: input.branchName || "",
     webhookUrl,
     webhookToken: input.webhookToken || process.env.LEADCONNECTOR_WEBHOOK_TOKEN || "",
     customerName: input.customerName || "",
@@ -208,6 +279,32 @@ export async function createReminderJob(input: ReminderInput) {
     metadata: input.metadata || {},
     reminders,
   });
+
+  return job;
+}
+
+export async function rescheduleReminderJob(job: ReminderJobDocument, input: ReminderInput) {
+  const appointmentAt = new Date(input.appointmentAt);
+  const timezone = normalizeTimezone(input.timezone);
+  const sentReminders = job.reminders.filter((reminder) => reminder.status === "sent");
+  const pendingReminders = buildReminderSchedule(appointmentAt, timezone, input.branchName).filter((reminder) => reminder.scheduledAt > new Date());
+
+  await ReminderJob.updateOne(
+    { _id: job._id },
+    {
+      $set: {
+        appointmentAt,
+        timezone,
+        branchName: input.branchName || "",
+        customerName: input.customerName || "",
+        customerLastName: input.customerLastName || "",
+        customerEmail: input.customerEmail || "",
+        customerPhone: input.customerPhone || "",
+        metadata: input.metadata || {},
+        reminders: [...sentReminders, ...pendingReminders],
+      },
+    },
+  ).exec();
 
   return job;
 }
@@ -288,6 +385,7 @@ export function serializeReminderJob(job: ReminderJobDocument) {
     externalId: job.externalId || null,
     appointmentAt: job.appointmentAt,
     timezone: job.timezone,
+    branchName: job.branchName || null,
     webhookUrl: job.webhookUrl,
     customerName: job.customerName || null,
     customerLastName: job.customerLastName || null,
