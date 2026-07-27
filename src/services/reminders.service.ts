@@ -207,7 +207,20 @@ export function getReminderBranchLabel(reminder: ReminderStep) {
   }
 }
 
+function formatAppointmentDate(date: Date, timezone: string) {
+  const local = getLocalDateParts(date, timezone);
+  return `${String(local.day).padStart(2, "0")}/${String(local.month).padStart(2, "0")}/${local.year}`;
+}
+
+function formatAppointmentTime(date: Date, timezone: string) {
+  const local = getLocalDateParts(date, timezone);
+  return `${String(local.hour).padStart(2, "0")}:${String(local.minute).padStart(2, "0")}`;
+}
+
 export function buildWebhookPayload(job: ReminderJobDocument, reminder: ReminderStep) {
+  const appointmentDate = formatAppointmentDate(job.appointmentAt, job.timezone);
+  const appointmentTime = formatAppointmentTime(job.appointmentAt, job.timezone);
+
   return {
     key: job.externalId || job._id.toString(),
     condition: getReminderCondition(reminder),
@@ -218,6 +231,10 @@ export function buildWebhookPayload(job: ReminderJobDocument, reminder: Reminder
     scheduledAt: reminder.scheduledAt.toISOString(),
     appointmentAt: job.appointmentAt.toISOString(),
     timezone: job.timezone,
+    appointmentDate,
+    appointmentTime,
+    fecha_cita: appointmentDate,
+    hora_cita: appointmentTime,
     customerName: job.customerName || null,
     customerLastName: job.customerLastName || null,
     customerEmail: job.customerEmail || null,

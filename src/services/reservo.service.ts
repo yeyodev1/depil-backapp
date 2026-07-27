@@ -79,6 +79,17 @@ function toReminderInput(appointment: ReservoAppointmentWithDetails): ReminderIn
   };
 }
 
+function hasAppointmentChanged(job: InstanceType<typeof ReminderJob>, input: ReminderInput) {
+  const appointmentAt = new Date(input.appointmentAt);
+  return job.appointmentAt.getTime() !== appointmentAt.getTime()
+    || job.timezone !== (input.timezone || process.env.APP_TIMEZONE || "America/Guayaquil")
+    || job.branchName !== (input.branchName || "")
+    || job.customerName !== (input.customerName || "")
+    || job.customerLastName !== (input.customerLastName || "")
+    || job.customerEmail !== (input.customerEmail || "")
+    || job.customerPhone !== (input.customerPhone || "");
+}
+
 async function fetchAppointmentsPage(url: string) {
   const response = await axios.get<ReservoAppointmentsPage>(url, {
     headers: { Authorization: `Token ${getReservoToken()}` },
@@ -146,8 +157,11 @@ export async function syncReservoAppointments() {
   const newAppointments = appointmentsWithDetails.filter((appointment) => !existingExternalIds.has(appointment.uuid));
 
   await Promise.all(newAppointments.map((appointment) => createReminderJob(toReminderInput(appointment))));
-  const jobsNeedingBranchSchedule = existingJobs.filter((job) => job.scheduleVersion !== REMINDER_SCHEDULE_VERSION);
-  await Promise.all(jobsNeedingBranchSchedule.map((job) => {
+  const jobsToReschedule = existingJobs.filter((job) => {
+    const appointment = appointmentsWithDetails.find((item) => item.uuid === job.externalId);
+    return appointment && (job.scheduleVersion !== REMINDER_SCHEDULE_VERSION || hasAppointmentChanged(job, toReminderInput(appointment)));
+  });
+  await Promise.all(jobsToReschedule.map((job) => {
     const appointment = appointmentsWithDetails.find((item) => item.uuid === job.externalId);
     return appointment ? rescheduleReminderJob(job, toReminderInput(appointment)) : job;
   }));
@@ -157,7 +171,7 @@ export async function syncReservoAppointments() {
     excluded: excludedAppointments.length,
     removed: removed.deletedCount || 0,
     created: newAppointments.length,
-    rescheduled: jobsNeedingBranchSchedule.length,
+    rescheduled: jobsToReschedule.length,
     deduplicated,
   };
 }

@@ -82,6 +82,10 @@ test("buildWebhookPayload exposes key and condition clearly", () => {
   assert.equal(payload.email, "daniela@example.com");
   assert.equal(payload.phone, "+593987179785");
   assert.equal(payload.externalId, "appointment-123");
+  assert.equal(payload.appointmentDate, "10/07/2026");
+  assert.equal(payload.appointmentTime, "09:00");
+  assert.equal(payload.fecha_cita, "10/07/2026");
+  assert.equal(payload.hora_cita, "09:00");
 });
 
 test("getReminderBranchLabel returns Spanish branch labels", () => {
