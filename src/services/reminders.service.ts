@@ -6,6 +6,13 @@ const MAX_ATTEMPTS = 3;
 export const REMINDER_SCHEDULE_VERSION = "branch-hours-v2";
 const DEFAULT_LEADCONNECTOR_WEBHOOK_URL =
   "https://services.leadconnectorhq.com/hooks/Mi698GRnau2R4Z1oR1nG/webhook-trigger/651a9c64-bab3-4b46-b70a-b2fd7267722e";
+const PERMANENTLY_EXCLUDED_BRANCHES = new Set([
+  "AMBATO",
+  "DEPIL GOLD",
+  "GOLDEN BODY GUAYAQUIL",
+  "GOLDEN BODY GYQ",
+  "GOLDEN BODY AMBATO",
+]);
 
 export type ReminderInput = {
   appointmentAt: string;
@@ -20,6 +27,18 @@ export type ReminderInput = {
   externalId?: string;
   metadata?: Record<string, unknown>;
 };
+
+function normalizeBranchName(value?: string) {
+  return (value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+}
+
+export function isReminderBranchExcluded(branchName?: string) {
+  return PERMANENTLY_EXCLUDED_BRANCHES.has(normalizeBranchName(branchName));
+}
+
+export function isReminderBranchUnverified(branchName?: string) {
+  return !normalizeBranchName(branchName);
+}
 
 type ReminderDispatchResult = {
   jobId: string;
@@ -273,6 +292,10 @@ async function dispatchReminder(job: ReminderJobDocument, reminder: ReminderStep
 }
 
 export async function createReminderJob(input: ReminderInput) {
+  if (isReminderBranchExcluded(input.branchName)) {
+    throw new Error(`Reminders are disabled for branch: ${input.branchName}`);
+  }
+
   const appointmentAt = new Date(input.appointmentAt);
 
   if (Number.isNaN(appointmentAt.getTime())) {
@@ -303,6 +326,11 @@ export async function createReminderJob(input: ReminderInput) {
 }
 
 export async function rescheduleReminderJob(job: ReminderJobDocument, input: ReminderInput) {
+  if (isReminderBranchExcluded(input.branchName)) {
+    await ReminderJob.deleteOne({ _id: job._id }).exec();
+    return job;
+  }
+
   const appointmentAt = new Date(input.appointmentAt);
   const timezone = normalizeTimezone(input.timezone);
   const sentReminders = job.reminders.filter((reminder) => reminder.status === "sent");
@@ -348,6 +376,11 @@ export async function processDueReminders(now = new Date()): Promise<ReminderDis
   const results: ReminderDispatchResult[] = [];
 
   for (const job of jobs) {
+    if (isReminderBranchExcluded(job.branchName) || isReminderBranchUnverified(job.branchName)) {
+      await ReminderJob.deleteOne({ _id: job._id }).exec();
+      continue;
+    }
+
     for (const reminder of job.reminders) {
       const dueForRetry = !reminder.nextAttemptAt || reminder.nextAttemptAt <= now;
       const isDue = reminder.status === "pending" && reminder.scheduledAt <= now && dueForRetry;

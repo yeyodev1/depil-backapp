@@ -5,6 +5,8 @@ import {
   buildWebhookPayload,
   getReminderBranchLabel,
   getReminderMessage,
+  isReminderBranchExcluded,
+  isReminderBranchUnverified,
 } from "./reminders.service";
 
 test("buildReminderSchedule creates the 3 reminder windows", () => {
@@ -38,6 +40,21 @@ test("getReminderMessage returns a distinct message per reminder type", () => {
   assert.equal(getReminderMessage({ type: "day_before_9am" } as never), "Recordatorio: tu cita está confirmada para mañana.");
   assert.equal(getReminderMessage({ type: "ten_hours_after_first" } as never), "Segundo recordatorio: tu cita se acerca.");
   assert.equal(getReminderMessage({ type: "one_hour_before" } as never), "Último recordatorio: tu cita es en 1 hora.");
+});
+
+test("permanently excludes branches that must never receive reminders", () => {
+  assert.equal(isReminderBranchExcluded("Ambato"), true);
+  assert.equal(isReminderBranchExcluded("Depil Gold"), true);
+  assert.equal(isReminderBranchExcluded("Golden Body Guayaquil"), true);
+  assert.equal(isReminderBranchExcluded("Golden Body GYQ"), true);
+  assert.equal(isReminderBranchExcluded("Golden Body Ambato"), true);
+  assert.equal(isReminderBranchExcluded("Quito"), false);
+});
+
+test("requires a branch before a reminder can be dispatched", () => {
+  assert.equal(isReminderBranchUnverified(), true);
+  assert.equal(isReminderBranchUnverified("   "), true);
+  assert.equal(isReminderBranchUnverified("Depil"), false);
 });
 
 test("buildWebhookPayload exposes key and condition clearly", () => {

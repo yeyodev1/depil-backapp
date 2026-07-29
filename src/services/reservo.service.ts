@@ -1,6 +1,12 @@
 import axios from "axios";
 import { ReminderJob } from "../models/ReminderJob";
-import { createReminderJob, ReminderInput, REMINDER_SCHEDULE_VERSION, rescheduleReminderJob } from "./reminders.service";
+import {
+  createReminderJob,
+  isReminderBranchExcluded,
+  ReminderInput,
+  REMINDER_SCHEDULE_VERSION,
+  rescheduleReminderJob,
+} from "./reminders.service";
 
 const RESERVO_API_URL = "https://reservo.cl/APIpublica/v2";
 const DEFAULT_SYNC_DAYS = 2;
@@ -58,6 +64,10 @@ function getExcludedBranches() {
       .map(normalizeBranchName)
       .filter(Boolean),
   );
+}
+
+function isExcludedBranch(branchName?: string) {
+  return isReminderBranchExcluded(branchName) || getExcludedBranches().has(normalizeBranchName(branchName));
 }
 
 function hasAppointmentDetails(appointment: ReservoAppointment): appointment is ReservoAppointmentWithDetails {
@@ -140,16 +150,15 @@ async function removeDuplicateReminderJobs() {
 export async function syncReservoAppointments() {
   const appointments = await getReservoAppointments();
   const deduplicated = await removeDuplicateReminderJobs();
-  const excludedBranches = getExcludedBranches();
   const excludedAppointments = appointments.filter(
-    (appointment) => appointment.uuid && excludedBranches.has(normalizeBranchName(appointment.sucursal?.nombre)),
+    (appointment) => appointment.uuid && isExcludedBranch(appointment.sucursal?.nombre),
   );
   const excludedIds = excludedAppointments.map((appointment) => appointment.uuid as string);
   const removed = excludedIds.length
     ? await ReminderJob.deleteMany({ externalId: { $in: excludedIds } }).exec()
     : { deletedCount: 0 };
   const appointmentsWithDetails = appointments
-    .filter((appointment) => !excludedBranches.has(normalizeBranchName(appointment.sucursal?.nombre)))
+    .filter((appointment) => !isExcludedBranch(appointment.sucursal?.nombre))
     .filter(hasAppointmentDetails);
   const externalIds = appointmentsWithDetails.map((appointment) => appointment.uuid);
   const existingJobs = await ReminderJob.find({ externalId: { $in: externalIds } }).exec();
